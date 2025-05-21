@@ -25,6 +25,10 @@ import matplotlib.pyplot as plt
 class CoachFeedback(BaseModel):
     feedback: str = Field(..., description="Socratic feedback for the player")
     risky_behavior_score: float = Field(..., description="Score 0-1 for risky behavior this year")
+    rec_stocks: float = Field(..., description="Recommended % allocation to stocks (0-100)")
+    rec_bonds: float = Field(..., description="Recommended % allocation to bonds (0-100)")
+    rec_cash: float = Field(..., description="Recommended % allocation to cash (0-100)")
+    rec_alternatives: float = Field(..., description="Recommended % allocation to alternatives (0-100)")
 
 class NarrativeOutput(BaseModel):
     narrative: str = Field(..., description="Short immersive story for the year")
@@ -51,9 +55,8 @@ def _initialize_agno_agent():
                 name="FinanceCoach",
                 model=OpenAIChat(id="gpt-4o"),
                 instructions=[
-                    "You are a Socratic personal finance coach. Given the player's age, asset allocation, risk buffer, and recent market/life events, give 2-line feedback and a risky-behavior score (0-1).",
-                    "Never be prescriptive; always ask guiding questions or highlight possible risks.",
-                    "Output JSON with keys: feedback, risky_behavior_score.",
+                    "You are a Socratic personal finance coach. Given the player's age, asset allocation, risk buffer, recent market/life events, and their goal, give 2-line feedback and a risky-behavior score (0-1).",
+                    "Always output a recommended allocation for the next year as four numbers (stocks, bonds, cash, alternatives) that sum to 100. Output JSON with keys: feedback, risky_behavior_score, rec_stocks, rec_bonds, rec_cash, rec_alternatives.",
                 ],
                 response_model=CoachFeedback,
             )
@@ -327,21 +330,22 @@ with main_left:
         st.download_button("Download CSV", csv, "portfolio_game_run.csv", "text/csv")
 
 with main_right:
-    # Prominent Run Year button at the top right using Streamlit button and custom style
-    st.markdown("""
-    <div style='display: flex; justify-content: flex-end; margin-bottom: 1em;'>
-        <div style='background: linear-gradient(90deg,#00c853,#b2ff59); padding: 0.5em 2em; border-radius: 8px; box-shadow: 0 2px 8px #0002;'>
-    """, unsafe_allow_html=True)
-    run_year_btn = st.button("🚀 Run Year", key="run_year_top", help="Run Year")
-    st.markdown("""
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Prominent Run Year button at the top right using Streamlit's native button
+    run_year_btn = st.button("🚀 Run Year", key="run_year_top", use_container_width=True)
     # Sticky news feed and AI coach advice
     with st.container():
         st.markdown("### 📰 News Feed & AI Coach")
         st.write(f"**Last Event:** {st.session_state.event}")
         st.write(f"**Coach:** {st.session_state.feedback}")
+        # Show coach's recommended allocation if available
+        rec = st.session_state.get('coach_recommendation', None)
+        if rec:
+            st.markdown("**Coach's Recommended Allocation:**")
+            st.write(f"- Stocks: {rec['Stocks']}%\n- Bonds: {rec['Bonds']}%\n- Cash: {rec['Cash']}%\n- Alternatives: {rec['Alternatives']}%")
+            if st.button("Apply Coach Recommendation", key="apply_coach_alloc"):
+                for k, v in zip(ASSET_CLASSES, [rec['Stocks'], rec['Bonds'], rec['Cash'], rec['Alternatives']]):
+                    st.session_state[f'alloc_{k}'] = int(v)
+                st.rerun()
         # --- Yearly return and grade ---
         hist = pd.DataFrame(st.session_state.history)
         if len(hist) > 1:
@@ -377,7 +381,7 @@ if run_year_btn:
     feedback = ""
     risky_behavior_score = 0
     narrative = ""
-    advisor_allocation = None
+    coach_recommendation = None
     if AGNO_READY and coach_agent:
         prompt = f"Age: {st.session_state.age}\nAllocation: {alloc}\nRisk buffer: {risk_buffer}\nEvent: {st.session_state.event}\nGoal: {st.session_state.goal}"
         try:
@@ -385,7 +389,12 @@ if run_year_btn:
             if response and response.content and isinstance(response.content, CoachFeedback):
                 feedback = response.content.feedback
                 risky_behavior_score = response.content.risky_behavior_score
-                # Optionally, parse recommended allocation from feedback if present
+                coach_recommendation = {
+                    'Stocks': int(response.content.rec_stocks),
+                    'Bonds': int(response.content.rec_bonds),
+                    'Cash': int(response.content.rec_cash),
+                    'Alternatives': int(response.content.rec_alternatives),
+                }
         except Exception as e:
             feedback = f"AI coach error: {e}"
     if AGNO_READY and narrative_agent:
@@ -399,4 +408,5 @@ if run_year_btn:
     st.session_state.feedback = feedback
     st.session_state.risky_behavior_score = risky_behavior_score
     st.session_state.narrative = narrative
+    st.session_state.coach_recommendation = coach_recommendation
     st.rerun() 
