@@ -242,7 +242,11 @@ with st.sidebar:
     alloc = {}
     remaining = 100
     for i, k in enumerate(ASSET_CLASSES):
-        default = int(DEFAULT_ALLOCATION[k]) if st.session_state.year == 0 else int(st.session_state.portfolio[k] / sum(st.session_state.portfolio.values()) * 100)
+        total_portfolio = sum(st.session_state.portfolio.values())
+        if st.session_state.year == 0 or total_portfolio == 0:
+            default = int(DEFAULT_ALLOCATION[k])
+        else:
+            default = int(st.session_state.portfolio[k] / total_portfolio * 100)
         max_val = remaining if i == len(ASSET_CLASSES)-1 else remaining
         if max_val > 0:
             alloc[k] = st.slider(f"{k} %", 0, max_val, min(default, max_val), key=f"alloc_{k}")
@@ -253,13 +257,22 @@ with st.sidebar:
         st.warning("Asset allocation must sum to 100%.")
         st.stop()
     st.markdown("---")
-    contribution_pct = st.slider("Contribution (% of salary)", 0, 50, int(st.session_state.contribution_pct))
+    # Show current mix pie chart in sidebar
+    pf = st.session_state.portfolio
+    fig, ax = plt.subplots()
+    ax.pie(list(pf.values()), labels=list(pf.keys()), autopct='%1.0f%%', startangle=90)
+    ax.set_title('Current Mix')
+    st.pyplot(fig)
+    st.markdown("---")
     rebalance = st.checkbox("Auto-rebalance portfolio", value=st.session_state.rebalance)
-    risk_buffer = st.slider("Emergency fund (months)", 0, 24, int(st.session_state.emergency_fund))
-    withdrawal = st.number_input("Withdrawal this year ($)", 0, 100_000, int(st.session_state.withdrawal), step=1000)
     st.markdown("---")
     st.caption("Adjust your plan, then click **Run Year** below.")
     run_year_btn = st.button("Run Year")
+
+# Set these to session state for simulation logic (not user-editable)
+contribution_pct = st.session_state.contribution_pct
+risk_buffer = st.session_state.emergency_fund
+withdrawal = st.session_state.withdrawal
 
 # --- MAIN LAYOUT ---
 main_left, main_right = st.columns([3, 2], gap="large")
@@ -276,8 +289,6 @@ with main_left:
     st.subheader("Current Portfolio")
     st.metric("Total Portfolio", f"${sum(pf.values()):,.0f}")
     st.metric("Salary", f"${st.session_state.salary:,.0f}")
-    st.metric("Snowball Meter", f"${st.session_state.snowball:,.0f}")
-    st.metric("Risk Barometer (VaR 5%)", f"{st.session_state.risk_score*100:.1f}%")
     st.metric("Phase", st.session_state.phase)
     st.markdown("---")
     # Portfolio value chart
@@ -321,11 +332,6 @@ with main_right:
         st.write(f"**Last Event:** {st.session_state.event}")
         st.write(f"**Coach:** {st.session_state.feedback}")
         st.progress(min(1, st.session_state.risky_behavior_score))
-        pf = st.session_state.portfolio
-        fig, ax = plt.subplots()
-        ax.pie(list(pf.values()), labels=list(pf.keys()), autopct='%1.0f%%', startangle=90)
-        ax.set_title('Current Mix')
-        st.pyplot(fig)
 
 # --- Run Year Button logic ---
 if run_year_btn:
