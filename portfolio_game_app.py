@@ -238,6 +238,9 @@ st.markdown(f"**You were born in {st.session_state.birthplace} with a starting b
 with st.sidebar:
     st.header("Your Yearly Plan")
     st.write(f"**Year {st.session_state.year+1}  |  Age {st.session_state.age}**")
+    # User-settable goal
+    goal = st.number_input("Set your target portfolio value at age 70 ($)", 10000, 10000000, 1000000, step=10000)
+    st.session_state.goal = goal
     # Dynamic allocation sliders that cannot sum above 100%
     alloc = {}
     remaining = 100
@@ -266,8 +269,7 @@ with st.sidebar:
     st.markdown("---")
     rebalance = st.checkbox("Auto-rebalance portfolio", value=st.session_state.rebalance)
     st.markdown("---")
-    st.caption("Adjust your plan, then click **Run Year** below.")
-    run_year_btn = st.button("Run Year")
+    st.caption("Adjust your plan, then click **Run Year** at the top right.")
 
 # Set these to session state for simulation logic (not user-editable)
 contribution_pct = st.session_state.contribution_pct
@@ -278,6 +280,11 @@ withdrawal = st.session_state.withdrawal
 main_left, main_right = st.columns([3, 2], gap="large")
 
 with main_left:
+    # Portfolio value very prominent
+    pf = st.session_state.portfolio
+    st.markdown("# 💰 Portfolio Value")
+    st.markdown(f"<h1 style='font-size:3em; color:green;'>${sum(pf.values()):,.0f}</h1>", unsafe_allow_html=True)
+    st.markdown(f"<b>Goal for age 70:</b> ${st.session_state.goal:,.0f}", unsafe_allow_html=True)
     # Narrative at the top
     if st.session_state.narrative:
         st.info(st.session_state.narrative)
@@ -285,9 +292,7 @@ with main_left:
     **Goal:** Make as much money as possible by age 70—while managing risk, life events, and your own behavior!
     """)
     st.markdown("---")
-    pf = st.session_state.portfolio
     st.subheader("Current Portfolio")
-    st.metric("Total Portfolio", f"${sum(pf.values()):,.0f}")
     st.metric("Salary", f"${st.session_state.salary:,.0f}")
     st.metric("Phase", st.session_state.phase)
     st.markdown("---")
@@ -300,10 +305,6 @@ with main_left:
         decade = (hist['Age']//10)*10
         mix_by_decade = hist.groupby(decade)[ASSET_CLASSES].mean()
         st.bar_chart(mix_by_decade, use_container_width=True, height=200)
-        st.subheader("❄️ Snowball Meter")
-        st.area_chart(hist.set_index('Year')[['Snowball']], use_container_width=True, height=150)
-        st.subheader("⚠️ Risk Barometer (VaR 5%)")
-        st.line_chart(hist.set_index('Year')[['VaR_5']], use_container_width=True, height=150)
         st.markdown("---")
         st.write("### Year-by-Year Breakdown")
         st.dataframe(hist, use_container_width=True, height=350)
@@ -312,8 +313,8 @@ with main_left:
         st.success("🏁 Game Over! Here's your final score:")
         final = hist.iloc[-1]
         st.metric("Final Portfolio Value", f"${final['Total']:,.0f}")
-        st.metric("Max Snowball", f"${hist['Snowball'].max():,.0f}")
-        st.metric("Risk-Adjusted Return (Sharpe-like)", f"{(final['Total']-10000)/hist['VaR_5'].std():.2f}")
+        st.metric("Max Portfolio Value", f"${hist['Total'].max():,.0f}")
+        st.metric("Goal Achieved", "Yes" if final['Total'] >= st.session_state.goal else "No")
         if (hist['Withdrawal'] == 0).all() and (hist['Cash'] >= final['Salary']/2).all():
             st.balloons()
             st.success("You earned the Financial Resilience badge!")
@@ -326,12 +327,48 @@ with main_left:
         st.download_button("Download CSV", csv, "portfolio_game_run.csv", "text/csv")
 
 with main_right:
+    # Prominent Run Year button at the top right using Streamlit button and custom style
+    st.markdown("""
+    <div style='display: flex; justify-content: flex-end; margin-bottom: 1em;'>
+        <div style='background: linear-gradient(90deg,#00c853,#b2ff59); padding: 0.5em 2em; border-radius: 8px; box-shadow: 0 2px 8px #0002;'>
+    """, unsafe_allow_html=True)
+    run_year_btn = st.button("🚀 Run Year", key="run_year_top", help="Run Year")
+    st.markdown("""
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     # Sticky news feed and AI coach advice
     with st.container():
         st.markdown("### 📰 News Feed & AI Coach")
         st.write(f"**Last Event:** {st.session_state.event}")
         st.write(f"**Coach:** {st.session_state.feedback}")
-        st.progress(min(1, st.session_state.risky_behavior_score))
+        # --- Yearly return and grade ---
+        hist = pd.DataFrame(st.session_state.history)
+        if len(hist) > 1:
+            last = hist.iloc[-1]
+            prev = hist.iloc[-2]
+            start_val = prev['Total']
+            end_val = last['Total']
+            if start_val > 0:
+                pct_return = (end_val - start_val) / start_val * 100
+            else:
+                pct_return = 0
+            # Letter grade logic
+            if pct_return >= 10:
+                grade = 'A'
+            elif pct_return >= 5:
+                grade = 'B'
+            elif pct_return >= 0:
+                grade = 'C'
+            elif pct_return >= -5:
+                grade = 'D'
+            else:
+                grade = 'F'
+            st.markdown(f"**Yearly Return:** {pct_return:+.1f}% (Grade: {grade})")
+            st.progress(min(1, max(0, pct_return/20)))
+        else:
+            st.markdown("**Yearly Return:** N/A (Grade: N/A)")
+            st.progress(0)
 
 # --- Run Year Button logic ---
 if run_year_btn:
@@ -340,13 +377,15 @@ if run_year_btn:
     feedback = ""
     risky_behavior_score = 0
     narrative = ""
+    advisor_allocation = None
     if AGNO_READY and coach_agent:
-        prompt = f"Age: {st.session_state.age}\nAllocation: {alloc}\nRisk buffer: {risk_buffer}\nEvent: {st.session_state.event}"
+        prompt = f"Age: {st.session_state.age}\nAllocation: {alloc}\nRisk buffer: {risk_buffer}\nEvent: {st.session_state.event}\nGoal: {st.session_state.goal}"
         try:
             response: RunResponse = coach_agent.run(prompt)
             if response and response.content and isinstance(response.content, CoachFeedback):
                 feedback = response.content.feedback
                 risky_behavior_score = response.content.risky_behavior_score
+                # Optionally, parse recommended allocation from feedback if present
         except Exception as e:
             feedback = f"AI coach error: {e}"
     if AGNO_READY and narrative_agent:
