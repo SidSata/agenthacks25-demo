@@ -20,6 +20,7 @@ from agno.models.openai import OpenAIChat
 from pydantic import BaseModel, Field
 import random
 import matplotlib.pyplot as plt
+from agno.tools.replicate import ReplicateTools
 
 # --- AGNO AGENT SETUP -------------------------------------------------------
 class CoachFeedback(BaseModel):
@@ -32,6 +33,10 @@ class CoachFeedback(BaseModel):
 
 class NarrativeOutput(BaseModel):
     narrative: str = Field(..., description="Short immersive story for the year")
+
+# For video narration: more scripted, cinematic
+class VideoNarrationOutput(BaseModel):
+    script: str = Field(..., description="A short, cinematic narration script for the year")
 
 OPENAI_API_KEY_VALUE = None
 AGNO_READY = False
@@ -239,6 +244,17 @@ st.markdown(f"**You were born in {st.session_state.birthplace} with a starting b
 
 # --- SIDEBAR: Controls ---
 with st.sidebar:
+    # Apply coach recommendation to sliders if requested
+    if st.session_state.get('apply_coach', False) and st.session_state.get('coach_recommendation'):
+        for k, v in zip(ASSET_CLASSES, [
+            st.session_state['coach_recommendation']['Stocks'],
+            st.session_state['coach_recommendation']['Bonds'],
+            st.session_state['coach_recommendation']['Cash'],
+            st.session_state['coach_recommendation']['Alternatives'],
+        ]):
+            st.session_state[f'alloc_{k}'] = int(v)
+        st.session_state['apply_coach'] = False
+        st.rerun()
     st.header("Your Yearly Plan")
     st.write(f"**Year {st.session_state.year+1}  |  Age {st.session_state.age}**")
     # User-settable goal
@@ -253,9 +269,12 @@ with st.sidebar:
             default = int(DEFAULT_ALLOCATION[k])
         else:
             default = int(st.session_state.portfolio[k] / total_portfolio * 100)
+        slider_key = f'alloc_{k}'
+        if slider_key not in st.session_state:
+            st.session_state[slider_key] = min(default, remaining)
         max_val = remaining if i == len(ASSET_CLASSES)-1 else remaining
         if max_val > 0:
-            alloc[k] = st.slider(f"{k} %", 0, max_val, min(default, max_val), key=f"alloc_{k}")
+            alloc[k] = st.slider(f"{k} %", 0, max_val, key=slider_key)
         else:
             alloc[k] = 0
         remaining -= alloc[k]
@@ -265,10 +284,13 @@ with st.sidebar:
     st.markdown("---")
     # Show current mix pie chart in sidebar
     pf = st.session_state.portfolio
-    fig, ax = plt.subplots()
-    ax.pie(list(pf.values()), labels=list(pf.keys()), autopct='%1.0f%%', startangle=90)
-    ax.set_title('Current Mix')
-    st.pyplot(fig)
+    if sum(pf.values()) > 0:
+        fig, ax = plt.subplots()
+        ax.pie(list(pf.values()), labels=list(pf.keys()), autopct='%1.0f%%', startangle=90)
+        ax.set_title('Current Mix')
+        st.pyplot(fig)
+    else:
+        st.info("No assets in portfolio to display mix.")
     st.markdown("---")
     rebalance = st.checkbox("Auto-rebalance portfolio", value=st.session_state.rebalance)
     st.markdown("---")
@@ -291,6 +313,7 @@ with main_left:
     # Narrative at the top
     if st.session_state.narrative:
         st.info(st.session_state.narrative)
+    # Show video narration if available
     st.markdown("""
     **Goal:** Make as much money as possible by age 70—while managing risk, life events, and your own behavior!
     """)
@@ -343,8 +366,7 @@ with main_right:
             st.markdown("**Coach's Recommended Allocation:**")
             st.write(f"- Stocks: {rec['Stocks']}%\n- Bonds: {rec['Bonds']}%\n- Cash: {rec['Cash']}%\n- Alternatives: {rec['Alternatives']}%")
             if st.button("Apply Coach Recommendation", key="apply_coach_alloc"):
-                for k, v in zip(ASSET_CLASSES, [rec['Stocks'], rec['Bonds'], rec['Cash'], rec['Alternatives']]):
-                    st.session_state[f'alloc_{k}'] = int(v)
+                st.session_state['apply_coach'] = True
                 st.rerun()
         # --- Yearly return and grade ---
         hist = pd.DataFrame(st.session_state.history)
