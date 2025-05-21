@@ -244,7 +244,10 @@ with st.sidebar:
     for i, k in enumerate(ASSET_CLASSES):
         default = int(DEFAULT_ALLOCATION[k]) if st.session_state.year == 0 else int(st.session_state.portfolio[k] / sum(st.session_state.portfolio.values()) * 100)
         max_val = remaining if i == len(ASSET_CLASSES)-1 else remaining
-        alloc[k] = st.slider(f"{k} %", 0, max_val, min(default, max_val), key=f"alloc_{k}")
+        if max_val > 0:
+            alloc[k] = st.slider(f"{k} %", 0, max_val, min(default, max_val), key=f"alloc_{k}")
+        else:
+            alloc[k] = 0
         remaining -= alloc[k]
     if sum(alloc.values()) != 100:
         st.warning("Asset allocation must sum to 100%.")
