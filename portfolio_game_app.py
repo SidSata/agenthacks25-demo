@@ -672,7 +672,8 @@ Give 2-line feedback and a risky-behavior score (0-1). Always output 2-3 actiona
         st.session_state.narrative = narrative
         st.session_state.coach_choices = coach_choices
         st.session_state.coach_justification = coach_justification
-        st.session_state.show_modal = True
+        if st.session_state.age < AGE_END:
+            st.session_state.show_modal = True
         st.rerun()
 
 # --- Simulate 5 Years Button logic ---
@@ -714,7 +715,8 @@ if simulate_5_btn:
             # If a modal is triggered (e.g., for a life event/choice), break and show it
             if st.session_state.get('show_modal', False):
                 break
-        st.session_state.show_modal = True
+        if st.session_state.age < AGE_END:
+            st.session_state.show_modal = True
         st.rerun()
 
 # --- Simulate Till End Button logic ---
@@ -751,5 +753,6 @@ if simulate_end_btn:
             run_year(alloc, contribution_pct, rebalance, risk_buffer, withdrawal)
             if st.session_state.get('show_modal', False):
                 break
-        st.session_state.show_modal = True
+        if st.session_state.age < AGE_END:
+            st.session_state.show_modal = True
         st.rerun() 
