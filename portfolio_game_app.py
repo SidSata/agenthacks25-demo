@@ -60,10 +60,24 @@ def show_year_modal():
                 else:
                     growth = float('nan')
                 growths[k] = growth
-            growth_str = '  '.join([
-                f"{k}: {growths[k]:+.1f}%" if not np.isnan(growths[k]) else f"{k}: N/A" for k in ASSET_CLASSES
-            ])
-            st.markdown(f"**Asset Growth This Year:**  {growth_str}")
+            # Nicer display: colored badges for each asset
+            badge_html = ""
+            for k in ASSET_CLASSES:
+                g = growths[k]
+                if np.isnan(g):
+                    color = '#888'
+                    val = 'N/A'
+                elif g > 0:
+                    color = '#27ae60'
+                    val = f'+{g:.1f}%'
+                elif g < 0:
+                    color = '#c0392b'
+                    val = f'{g:.1f}%'
+                else:
+                    color = '#888'
+                    val = '0.0%'
+                badge_html += f"<span style='display:inline-block; margin-right:10px; padding:4px 12px; border-radius:12px; background:{color}; color:white; font-weight:bold;'>{k}: {val}</span>"
+            st.markdown(f"**Asset Growth This Year:**<br>{badge_html}", unsafe_allow_html=True)
         else:
             st.markdown("**Asset Growth This Year:**  N/A (first year)")
         # Show the life event
