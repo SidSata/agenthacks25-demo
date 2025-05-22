@@ -29,8 +29,15 @@ from agno.memory.v2.schema import UserMemory
 
 load_dotenv()
 
+# --- GAME CONSTANTS (moved up for early use) ------------------------------
+AGE_START = 20
+AGE_END = 30  # Only 10 years, end at age 30
+YEARS = AGE_END - AGE_START
+ASSET_CLASSES = ["Stocks", "Bonds", "Cash", "Alternatives"]
+DEFAULT_ALLOCATION = {"Stocks": 60, "Bonds": 30, "Cash": 10, "Alternatives": 0}
+
 # --- STREAMLIT UI -----------------------------------------------------------
-st.set_page_config("💸 Portfolio Game Simulator", layout="wide")
+st.set_page_config("\U0001F4B8 Portfolio Game Simulator", layout="wide")
 
 # --- MODAL WORKAROUND: Show modal at the very top and block rest of app ---
 def show_year_modal():
@@ -46,15 +53,20 @@ def show_year_modal():
         st.metric("Portfolio Value", f"${last['Total']:,.0f}", f"{change:+,.0f} ({change_pct:+.1f}%)")
         # Show the life event
         if st.session_state.event:
-            st.markdown(f"### 📰 Life Event: {st.session_state.event}")
+            st.markdown(f"### \U0001F4F0 Life Event: {st.session_state.event}")
         if st.session_state.narrative:
             st.info(st.session_state.narrative)
         if st.session_state.feedback:
-            st.write(f"**Coach Dinero 🧑‍💼:** {st.session_state.feedback}")
+            st.write(f"**Coach Dinero \U0001F9D1‍\U0001F4BC:** {st.session_state.feedback}")
         choices = st.session_state.get('coach_choices', None)
         if choices:
             st.markdown("### What will you do?")
-            choice_labels = [f"{c['label']}: {c['description']}" for c in choices]
+            # Show each choice with its allocation
+            choice_labels = []
+            for c in choices:
+                alloc_str = ', '.join([f"{k}: {c[k]}%" for k in ASSET_CLASSES])
+                label = f"{c['label']}: {c['description']}\n> **New Allocation:** {alloc_str}"
+                choice_labels.append(label)
             selected = st.radio("Choose your response:", choice_labels, key=f"choice_{st.session_state.year}")
             if st.button("Confirm Choice", key=f"confirm_{st.session_state.year}"):
                 selected_choice = choices[choice_labels.index(selected)]
@@ -140,11 +152,6 @@ def _initialize_agno_agent():
         AGNO_READY = False
 
 # --- GAME CONSTANTS ---------------------------------------------------------
-AGE_START = 20
-AGE_END = 30  # Only 10 years, end at age 30
-YEARS = AGE_END - AGE_START
-ASSET_CLASSES = ["Stocks", "Bonds", "Cash", "Alternatives"]
-DEFAULT_ALLOCATION = {"Stocks": 60, "Bonds": 30, "Cash": 10, "Alternatives": 0}
 BIRTHPLACES = [
     ("United States", 12000, 60000),
     ("India", 3000, 15000),
