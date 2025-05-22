@@ -480,19 +480,23 @@ with main_right:
             # Letter grade logic
             if pct_return >= 10:
                 grade = 'A'
+                grade_color = 'green'
             elif pct_return >= 5:
                 grade = 'B'
+                grade_color = 'blue'
             elif pct_return >= 0:
                 grade = 'C'
+                grade_color = 'orange'
             elif pct_return >= -5:
                 grade = 'D'
+                grade_color = 'red'
             else:
                 grade = 'F'
-            st.markdown(f"**Yearly Return:** {pct_return:+.1f}% (Grade: {grade})")
-            st.progress(min(1, max(0, pct_return/20)))
+                grade_color = 'darkred'
+            st.markdown(f"**Yearly Return:** {pct_return:+.1f}%")
+            st.markdown(f"<span style='font-size:2em; font-weight:bold; color:{grade_color};'>Grade: {grade}</span>", unsafe_allow_html=True)
         else:
             st.markdown("**Yearly Return:** N/A (Grade: N/A)")
-            st.progress(0)
 
 # --- Run Year Button logic ---
 if run_year_btn:
