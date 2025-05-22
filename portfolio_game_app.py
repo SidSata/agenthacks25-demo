@@ -441,10 +441,9 @@ with main_left:
     if not hist.empty:
         st.subheader("📈 Portfolio Value Over Time")
         st.line_chart(hist.set_index('Year')[['Total']], use_container_width=True, height=300)
-        st.subheader("📊 Asset Mix by Decade")
-        decade = (hist['Age']//10)*10
-        mix_by_decade = hist.groupby(decade)[ASSET_CLASSES].mean()
-        st.bar_chart(mix_by_decade, use_container_width=True, height=200)
+        st.subheader("📊 Asset Mix by Year")
+        mix_by_year = hist.groupby('Year')[ASSET_CLASSES].mean()
+        st.bar_chart(mix_by_year, use_container_width=True, height=200)
         st.markdown("---")
         st.write("### Year-by-Year Breakdown")
         st.dataframe(hist, use_container_width=True, height=350)
