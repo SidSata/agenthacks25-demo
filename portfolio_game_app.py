@@ -34,44 +34,10 @@ class CoachFeedback(BaseModel):
     rec_bonds: float = Field(..., description="Recommended % allocation to bonds (0-100)")
     rec_cash: float = Field(..., description="Recommended % allocation to cash (0-100)")
     rec_alternatives: float = Field(..., description="Recommended % allocation to alternatives (0-100)")
+    rec_justification: str = Field(..., description="Justification for the recommended allocation")
 
 class NarrativeOutput(BaseModel):
     narrative: str = Field(..., description="Short immersive story for the year")
-
-# For video narration: more scripted, cinematic
-class VideoNarrationOutput(BaseModel):
-    script: str = Field(..., description="A short, cinematic narration script for the year")
-
-# Instantiate narrator and video agents at top-level
-narrator_agent = Agent(
-    name="Narrator Agent",
-    model=OpenAIChat(id="gpt-4o"),
-    instructions=[
-        "You are a cinematic narrator for a financial life simulation game.",
-        "Given the player's age, birthplace, phase, last event, and portfolio, write a short, vivid, cinematic narration script (2-3 sentences, present tense, for video voiceover) that sets the scene and emotional context for the year. Make it engaging and relevant to the player's situation.",
-        "Output JSON with key: script.",
-    ],
-    response_model=VideoNarrationOutput,
-)
-
-video_agent = Agent(
-    name="Video Generator Agent",
-    model=OpenAIChat(id="gpt-4o"),
-    tools=[
-        ReplicateTools(
-            model="tencent/hunyuan-video:847dfa8b01e739637fc76f480ede0c1d76408e1d694b830b5dfb8e547bf98405"
-        )
-    ],
-    description="You are an AI agent that can generate videos using the Replicate API.",
-    instructions=[
-        "When the user asks you to create a video, use the `generate_media` tool to create the video.",
-        "Return the URL as raw to the user.",
-        "Don't convert video URL to markdown or anything else.",
-    ],
-    markdown=True,
-    debug_mode=True,
-    show_tool_calls=True,
-)
 
 OPENAI_API_KEY_VALUE = None
 AGNO_READY = False
@@ -96,7 +62,7 @@ def _initialize_agno_agent():
                 model=OpenAIChat(id="gpt-4o"),
                 instructions=[
                     "You are a Socratic personal finance coach. Given the player's age, asset allocation, risk buffer, recent market/life events, and their goal, give 2-line feedback and a risky-behavior score (0-1).",
-                    "Always output a recommended allocation for the next year as four numbers (stocks, bonds, cash, alternatives) that sum to 100. Output JSON with keys: feedback, risky_behavior_score, rec_stocks, rec_bonds, rec_cash, rec_alternatives.",
+                    "Always output a recommended allocation for the next year as four numbers (stocks, bonds, cash, alternatives) that sum to 100, and provide a concise justification for this recommendation. Output JSON with keys: feedback, risky_behavior_score, rec_stocks, rec_bonds, rec_cash, rec_alternatives, rec_justification.",
                 ],
                 response_model=CoachFeedback,
             )
@@ -348,12 +314,6 @@ with main_left:
     # Narrative at the top
     if st.session_state.narrative:
         st.info(st.session_state.narrative)
-    # Show video narration if available
-    if st.session_state.get('video_url'):
-        st.video(st.session_state['video_url'])
-        st.write(f"Video URL: {st.session_state['video_url']}")
-    else:
-        st.warning("No video was generated for this year.")
     st.markdown("---")
     st.subheader("Current Portfolio")
     st.metric("Salary", f"${st.session_state.salary:,.0f}")
@@ -402,6 +362,8 @@ with main_right:
         if rec:
             st.markdown("**Coach's Recommended Allocation:**")
             st.write(f"- Stocks: {rec['Stocks']}%\n- Bonds: {rec['Bonds']}%\n- Cash: {rec['Cash']}%\n- Alternatives: {rec['Alternatives']}%")
+            if rec.get('Justification'):
+                st.info(f"**Coach's Justification:** {rec['Justification']}")
             if st.button("Apply Coach Recommendation", key="apply_coach_alloc"):
                 st.session_state['apply_coach'] = True
                 st.rerun()
@@ -435,61 +397,39 @@ with main_right:
 
 # --- Run Year Button logic ---
 if run_year_btn:
-    run_year(alloc, contribution_pct, rebalance, risk_buffer, withdrawal)
-    # AI Coach feedback
-    feedback = ""
-    risky_behavior_score = 0
-    narrative = ""
-    coach_recommendation = None
-    video_url = None
-    if AGNO_READY and coach_agent:
-        prompt = f"Age: {st.session_state.age}\nAllocation: {alloc}\nRisk buffer: {risk_buffer}\nEvent: {st.session_state.event}\nGoal: {st.session_state.goal}"
-        try:
-            response: RunResponse = coach_agent.run(prompt)
-            if response and response.content and isinstance(response.content, CoachFeedback):
-                feedback = response.content.feedback
-                risky_behavior_score = response.content.risky_behavior_score
-                coach_recommendation = {
-                    'Stocks': int(response.content.rec_stocks),
-                    'Bonds': int(response.content.rec_bonds),
-                    'Cash': int(response.content.rec_cash),
-                    'Alternatives': int(response.content.rec_alternatives),
-                }
-        except Exception as e:
-            feedback = f"AI coach error: {e}"
-    if AGNO_READY and narrative_agent:
-        n_prompt = f"Age: {st.session_state.age}\nBirthplace: {st.session_state.birthplace}\nPhase: {st.session_state.phase}\nEvent: {st.session_state.event}\nPortfolio: {st.session_state.portfolio}"
-        try:
-            n_response: RunResponse = narrative_agent.run(n_prompt)
-            if n_response and n_response.content and isinstance(n_response.content, NarrativeOutput):
-                narrative = n_response.content.narrative
-        except Exception as e:
-            narrative = f"Narrative agent error: {e}"
-    # Video narration: get script, then generate video
-    video_script = None
-    if AGNO_READY and narrator_agent:
-        v_prompt = f"Age: {st.session_state.age}\nBirthplace: {st.session_state.birthplace}\nPhase: {st.session_state.phase}\nEvent: {st.session_state.event}\nPortfolio: {st.session_state.portfolio}"
-        try:
-            v_response: RunResponse = narrator_agent.run(v_prompt)
-            if v_response and v_response.content and isinstance(v_response.content, VideoNarrationOutput):
-                video_script = v_response.content.script
-        except Exception as e:
-            video_script = None
-    if AGNO_READY and video_agent and video_script:
-        try:
-            video_response: RunResponse = video_agent.run(f"Generate a video narration: {video_script}")
-            if video_response and video_response.content:
-                content_str = str(video_response.content).strip()
-                url_match = re.search(r"https?://[^\s)]+", content_str)
-                if url_match:
-                    video_url = url_match.group(0)
-                else:
-                    video_url = None
-        except Exception as e:
-            video_url = None
-    st.session_state.feedback = feedback
-    st.session_state.risky_behavior_score = risky_behavior_score
-    st.session_state.narrative = narrative
-    st.session_state.coach_recommendation = coach_recommendation
-    st.session_state.video_url = video_url
-    st.rerun() 
+    with st.spinner("Simulating year and getting coach advice..."):
+        run_year(alloc, contribution_pct, rebalance, risk_buffer, withdrawal)
+        # AI Coach feedback
+        feedback = ""
+        risky_behavior_score = 0
+        narrative = ""
+        coach_recommendation = None
+        if AGNO_READY and coach_agent:
+            prompt = f"Age: {st.session_state.age}\nAllocation: {alloc}\nRisk buffer: {risk_buffer}\nEvent: {st.session_state.event}\nGoal: {st.session_state.goal}"
+            try:
+                response: RunResponse = coach_agent.run(prompt)
+                if response and response.content and isinstance(response.content, CoachFeedback):
+                    feedback = response.content.feedback
+                    risky_behavior_score = response.content.risky_behavior_score
+                    coach_recommendation = {
+                        'Stocks': int(response.content.rec_stocks),
+                        'Bonds': int(response.content.rec_bonds),
+                        'Cash': int(response.content.rec_cash),
+                        'Alternatives': int(response.content.rec_alternatives),
+                        'Justification': response.content.rec_justification,
+                    }
+            except Exception as e:
+                feedback = f"AI coach error: {e}"
+        if AGNO_READY and narrative_agent:
+            n_prompt = f"Age: {st.session_state.age}\nBirthplace: {st.session_state.birthplace}\nPhase: {st.session_state.phase}\nEvent: {st.session_state.event}\nPortfolio: {st.session_state.portfolio}"
+            try:
+                n_response: RunResponse = narrative_agent.run(n_prompt)
+                if n_response and n_response.content and isinstance(n_response.content, NarrativeOutput):
+                    narrative = n_response.content.narrative
+            except Exception as e:
+                narrative = f"Narrative agent error: {e}"
+        st.session_state.feedback = feedback
+        st.session_state.risky_behavior_score = risky_behavior_score
+        st.session_state.narrative = narrative
+        st.session_state.coach_recommendation = coach_recommendation
+        st.rerun() 
