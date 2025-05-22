@@ -23,10 +23,17 @@ import matplotlib.pyplot as plt
 from agno.tools.replicate import ReplicateTools
 from dotenv import load_dotenv
 import re
+from agno.memory.v2.memory import Memory
+from agno.memory.v2.db.sqlite import SqliteMemoryDb
+from agno.memory.v2.schema import UserMemory
 
 load_dotenv()
 
 # --- AGNO AGENT SETUP -------------------------------------------------------
+class CoachChoice(BaseModel):
+    label: str = Field(..., description="Short label for the choice (e.g. 'Stay the Course')")
+    description: str = Field(..., description="Description of the choice and its risk/reward")
+
 class CoachFeedback(BaseModel):
     feedback: str = Field(..., description="Socratic feedback for the player")
     risky_behavior_score: float = Field(..., description="Score 0-1 for risky behavior this year")
@@ -35,6 +42,7 @@ class CoachFeedback(BaseModel):
     rec_cash: float = Field(..., description="Recommended % allocation to cash (0-100)")
     rec_alternatives: float = Field(..., description="Recommended % allocation to alternatives (0-100)")
     rec_justification: str = Field(..., description="Justification for the recommended allocation")
+    choices: list[CoachChoice] = Field(default_factory=list, description="List of player choices for this event, if any.")
 
 class NarrativeOutput(BaseModel):
     narrative: str = Field(..., description="Short immersive story for the year")
@@ -113,16 +121,23 @@ RETURNS = {
 INFLATION_MEAN, INFLATION_STD = 0.025, 0.01
 SALARY_GROWTH_MEAN, SALARY_GROWTH_STD = 0.03, 0.02
 
-# --- RANDOM EVENTS ----------------------------------------------------------
+# --- RANDOM EVENTS (WITH CHOICES) -------------------------------------------
 NEWS_EVENTS = [
-    ("Dot-com crash! Stocks drop 30%.", {"Stocks": -0.3}),
-    ("Bond rally! Bonds up 10%.", {"Bonds": 0.1}),
-    ("Crypto boom! Alternatives up 20%.", {"Alternatives": 0.2}),
-    ("Inflation spike! Cash loses 5% value.", {"Cash": -0.05}),
-    ("Layoff! Must withdraw 6 months' salary.", "layoff"),
-    ("Medical bill! Emergency fund needed.", "medical"),
-    ("Bull market! Stocks up 15%.", {"Stocks": 0.15}),
-    ("No major events this year.", {}),
+    ("Dot-com crash! Stocks drop 30%.", {"Stocks": -0.3}, None),
+    ("Bond rally! Bonds up 10%.", {"Bonds": 0.1}, None),
+    ("Crypto boom! Alternatives up 20%.", {"Alternatives": 0.2}, None),
+    ("Inflation spike! Cash loses 5% value.", {"Cash": -0.05}, None),
+    ("Layoff! Must withdraw 6 months' salary.", "layoff", None),
+    ("Medical bill! Emergency fund needed.", "medical", None),
+    ("Bull market! Stocks up 15%.", {"Stocks": 0.15}, None),
+    ("No major events this year.", {}, None),
+    ("Tech Bubble Burst! Your tech-heavy stock allocation has taken a 40% hit.",
+     {"Stocks": -0.4},
+     [
+         {"label": "Stay the Course", "description": "Ride it out, hope for recovery. (Risk: Further drops)"},
+         {"label": "Rebalance Now", "description": "Sell some of what's left of stocks and buy more bonds/cash. (Risk: Miss out on a quick rebound, lock in some loss)"},
+         {"label": "Double Down", "description": "Buy more stocks at these lower prices. (Risk: High risk, high potential reward/loss)"},
+     ]),
 ]
 
 # --- SESSION STATE INIT -----------------------------------------------------
@@ -148,6 +163,9 @@ def init_state():
         st.session_state.feedback = ""
         st.session_state.risky_behavior_score = 0
         st.session_state.narrative = ""
+        st.session_state.last_coach_advice = None
+        st.session_state.ignored_advice_count = 0
+        st.session_state.player_outperformed_count = 0
 
 # --- GAME PHASES ------------------------------------------------------------
 def get_phase(age):
@@ -160,8 +178,8 @@ def get_phase(age):
     else:
         return "Retirement"
 
-# --- SIMULATION ENGINE ------------------------------------------------------
-def run_year(allocation, contribution_pct, rebalance, risk_buffer, withdrawal):
+# --- SIMULATION ENGINE (MODIFIED TO HANDLE CHOICES) -------------------------
+def run_year(allocation, contribution_pct, rebalance, risk_buffer, withdrawal, player_choice=None):
     # Salary growth
     salary = st.session_state.salary * np.random.normal(1 + SALARY_GROWTH_MEAN, SALARY_GROWTH_STD)
     # Inflation
@@ -169,7 +187,10 @@ def run_year(allocation, contribution_pct, rebalance, risk_buffer, withdrawal):
     # Market returns
     returns = {k: np.random.normal(RETURNS[k][0], RETURNS[k][1]) for k in ASSET_CLASSES}
     # News event
-    event, effect = random.choice(NEWS_EVENTS)
+    event, effect, choices = random.choice(NEWS_EVENTS)
+    st.session_state.current_event_choices = choices
+    st.session_state.current_event_label = event
+    st.session_state.current_event_effect = effect
     # Apply event
     if isinstance(effect, dict):
         for k, v in effect.items():
@@ -180,6 +201,22 @@ def run_year(allocation, contribution_pct, rebalance, risk_buffer, withdrawal):
     elif effect == "medical":
         withdrawal += salary / 4 # 3 months' salary
         event += f" Medical bill: ${withdrawal:,.0f}."
+    # If player_choice is given and choices exist, apply additional logic (placeholder)
+    if choices and player_choice is not None:
+        # Example: modify returns or allocations based on choice
+        if player_choice == 0:  # Stay the Course
+            pass  # No change
+        elif player_choice == 1:  # Rebalance Now
+            # Move 20% from stocks to bonds/cash
+            move = min(st.session_state.portfolio["Stocks"] * 0.2, st.session_state.portfolio["Stocks"])
+            st.session_state.portfolio["Stocks"] -= move
+            st.session_state.portfolio["Bonds"] += move / 2
+            st.session_state.portfolio["Cash"] += move / 2
+        elif player_choice == 2:  # Double Down
+            # Add 10% more to stocks from cash if possible
+            move = min(st.session_state.portfolio["Cash"] * 0.1, st.session_state.portfolio["Cash"])
+            st.session_state.portfolio["Cash"] -= move
+            st.session_state.portfolio["Stocks"] += move
     # Asset growth
     portfolio = st.session_state.portfolio.copy()
     total = sum(portfolio.values())
@@ -302,6 +339,15 @@ contribution_pct = st.session_state.contribution_pct
 risk_buffer = st.session_state.emergency_fund
 withdrawal = st.session_state.withdrawal
 
+# --- MEMORY SETUP -----------------------------------------------------------
+os.makedirs('tmp', exist_ok=True)
+memory_db = SqliteMemoryDb(
+    table_name="user_memories",
+    db_file="tmp/memory.db"
+)
+memory = Memory(db=memory_db)
+user_id = "player1"  # You can make this dynamic if you want
+
 # --- MAIN LAYOUT ---
 main_left, main_right = st.columns([3, 2], gap="large")
 
@@ -356,7 +402,7 @@ with main_right:
     with st.container():
         st.markdown("### 📰 News Feed & AI Coach")
         st.write(f"**Last Event:** {st.session_state.event}")
-        st.write(f"**Coach:** {st.session_state.feedback}")
+        st.write(f"**Coach Dinero 🧑‍💼:** {st.session_state.feedback}")
         # Show coach's recommended allocation if available
         rec = st.session_state.get('coach_recommendation', None)
         if rec:
@@ -398,6 +444,39 @@ with main_right:
 # --- Run Year Button logic ---
 if run_year_btn:
     with st.spinner("Simulating year and getting coach advice..."):
+        # Get last year's return for memory
+        last_yearly_return = 0
+        if len(st.session_state.history) > 0:
+            hist = pd.DataFrame(st.session_state.history)
+            if len(hist) > 1:
+                last_yearly_return = (hist.iloc[-1]['Total'] - hist.iloc[-2]['Total']) / hist.iloc[-2]['Total'] * 100 if hist.iloc[-2]['Total'] > 0 else 0
+            else:
+                last_yearly_return = (hist.iloc[-1]['Total'] - st.session_state.starting_budget) / st.session_state.starting_budget * 100 if st.session_state.starting_budget > 0 else 0
+
+        # Add a memory of last year's action and outcome
+        ignored_advice = False
+        if st.session_state.last_coach_advice:
+            # Simple check if allocation was different
+            if any(alloc[k] != st.session_state.last_coach_advice[k] for k in ASSET_CLASSES):
+                ignored_advice = True
+                st.session_state.ignored_advice_count += 1
+            if last_yearly_return > 5 and ignored_advice: # Arbitrary threshold for outperformance
+                st.session_state.player_outperformed_count += 1
+
+        action_summary = f"Year {st.session_state.year}: Player allocated: {alloc}. "
+        if st.session_state.last_coach_advice:
+            action_summary += f"Coach recommended: {st.session_state.last_coach_advice}. "
+        if ignored_advice:
+            action_summary += "(Player ignored advice). "
+        action_summary += f"Outcome: {last_yearly_return:.1f}% return."
+        memory.add_user_memory(
+            memory=UserMemory(
+                memory=action_summary,
+                topics=["actions", "advice", "outcome"]
+            ),
+            user_id=user_id
+        )
+
         run_year(alloc, contribution_pct, rebalance, risk_buffer, withdrawal)
         # AI Coach feedback
         feedback = ""
@@ -405,7 +484,25 @@ if run_year_btn:
         narrative = ""
         coach_recommendation = None
         if AGNO_READY and coach_agent:
-            prompt = f"Age: {st.session_state.age}\nAllocation: {alloc}\nRisk buffer: {risk_buffer}\nEvent: {st.session_state.event}\nGoal: {st.session_state.goal}"
+            # Retrieve memories for the coach
+            recent_memories = memory.get_user_memories(user_id=user_id)
+            memories_text = "\n".join([m.memory for m in recent_memories[-5:]])  # Last 5 years
+            ignored_count = st.session_state.ignored_advice_count
+            outperformed_count = st.session_state.player_outperformed_count
+            prompt = f"""You are Coach Dinero 🧑‍💼, a Socratic personal finance coach. You can recall the player's past actions. Player has ignored your advice {ignored_count} times and outperformed you {outperformed_count} times.
+
+Player's Past Actions (last 5 years):
+{memories_text}
+
+Current Situation:
+Age: {st.session_state.age}
+Current Allocation: {alloc}
+Risk Buffer: {risk_buffer}
+Last Market Event: {st.session_state.event}
+Player's Goal (at age 70): ${st.session_state.goal:,.0f}
+
+Give 2-line feedback and a risky-behavior score (0-1). Always output a recommended allocation for the next year (stocks, bonds, cash, alternatives summing to 100) and a concise justification. Adjust your tone based on player's history.
+"""
             try:
                 response: RunResponse = coach_agent.run(prompt)
                 if response and response.content and isinstance(response.content, CoachFeedback):
@@ -418,9 +515,10 @@ if run_year_btn:
                         'Alternatives': int(response.content.rec_alternatives),
                         'Justification': response.content.rec_justification,
                     }
+                    st.session_state.last_coach_advice = {k: coach_recommendation[k] for k in ASSET_CLASSES}
             except Exception as e:
                 feedback = f"AI coach error: {e}"
-        if AGNO_READY and narrative_agent:
+        if AGNO_READY and narrative_agent: # Check if narrative_agent is not None
             n_prompt = f"Age: {st.session_state.age}\nBirthplace: {st.session_state.birthplace}\nPhase: {st.session_state.phase}\nEvent: {st.session_state.event}\nPortfolio: {st.session_state.portfolio}"
             try:
                 n_response: RunResponse = narrative_agent.run(n_prompt)
@@ -432,4 +530,49 @@ if run_year_btn:
         st.session_state.risky_behavior_score = risky_behavior_score
         st.session_state.narrative = narrative
         st.session_state.coach_recommendation = coach_recommendation
-        st.rerun() 
+        st.session_state.show_modal = True
+        st.rerun()
+
+# Show modal if needed
+if st.session_state.get('show_modal', False):
+    show_year_modal()
+
+# --- MODAL UI AFTER RUNNING YEAR --------------------------------------------
+def show_year_modal():
+    hist = pd.DataFrame(st.session_state.history)
+    if len(hist) < 1:
+        return
+    last = hist.iloc[-1]
+    prev = hist.iloc[-2] if len(hist) > 1 else None
+    change = last['Total'] - (prev['Total'] if prev is not None else st.session_state.starting_budget)
+    change_pct = (change / (prev['Total'] if prev is not None else st.session_state.starting_budget)) * 100 if (prev is not None and prev['Total'] > 0) or (prev is None and st.session_state.starting_budget > 0) else 0
+    # Modal content (simulate modal with a container at the top)
+    with st.container():
+        st.markdown("""
+            <div style='position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center;'>
+                <div style='background:white; padding:2em; border-radius:1em; min-width:350px; max-width:90vw;'>
+        """, unsafe_allow_html=True)
+        st.markdown(f"## Year {st.session_state.year} Summary")
+        st.metric("Portfolio Value", f"${last['Total']:,.0f}", f"{change:+,.0f} ({change_pct:+.1f}%)")
+        if st.session_state.narrative:
+            st.info(st.session_state.narrative)
+        if st.session_state.feedback:
+            st.write(f"**Coach Dinero 🧑‍💼:** {st.session_state.feedback}")
+        # Show choices if any
+        choices = st.session_state.get('current_event_choices', None)
+        if choices:
+            st.markdown("### What will you do?")
+            choice_labels = [c['label'] for c in choices]
+            choice_idx = st.radio("Choose your response:", choice_labels, key=f"choice_{st.session_state.year}")
+            if st.button("Confirm Choice", key=f"confirm_{st.session_state.year}"):
+                st.session_state.selected_choice = choice_labels.index(choice_idx)
+                st.session_state.show_modal = False
+                st.rerun()
+        else:
+            if st.button("Continue", key=f"continue_{st.session_state.year}"):
+                st.session_state.show_modal = False
+                st.rerun()
+        st.markdown("""
+                </div>
+            </div>
+        """, unsafe_allow_html=True) 
