@@ -21,6 +21,10 @@ from pydantic import BaseModel, Field
 import random
 import matplotlib.pyplot as plt
 from agno.tools.replicate import ReplicateTools
+from dotenv import load_dotenv
+import re
+
+load_dotenv()
 
 # --- AGNO AGENT SETUP -------------------------------------------------------
 class CoachFeedback(BaseModel):
@@ -37,6 +41,37 @@ class NarrativeOutput(BaseModel):
 # For video narration: more scripted, cinematic
 class VideoNarrationOutput(BaseModel):
     script: str = Field(..., description="A short, cinematic narration script for the year")
+
+# Instantiate narrator and video agents at top-level
+narrator_agent = Agent(
+    name="Narrator Agent",
+    model=OpenAIChat(id="gpt-4o"),
+    instructions=[
+        "You are a cinematic narrator for a financial life simulation game.",
+        "Given the player's age, birthplace, phase, last event, and portfolio, write a short, vivid, cinematic narration script (2-3 sentences, present tense, for video voiceover) that sets the scene and emotional context for the year. Make it engaging and relevant to the player's situation.",
+        "Output JSON with key: script.",
+    ],
+    response_model=VideoNarrationOutput,
+)
+
+video_agent = Agent(
+    name="Video Generator Agent",
+    model=OpenAIChat(id="gpt-4o"),
+    tools=[
+        ReplicateTools(
+            model="tencent/hunyuan-video:847dfa8b01e739637fc76f480ede0c1d76408e1d694b830b5dfb8e547bf98405"
+        )
+    ],
+    description="You are an AI agent that can generate videos using the Replicate API.",
+    instructions=[
+        "When the user asks you to create a video, use the `generate_media` tool to create the video.",
+        "Return the URL as raw to the user.",
+        "Don't convert video URL to markdown or anything else.",
+    ],
+    markdown=True,
+    debug_mode=True,
+    show_tool_calls=True,
+)
 
 OPENAI_API_KEY_VALUE = None
 AGNO_READY = False
@@ -314,9 +349,11 @@ with main_left:
     if st.session_state.narrative:
         st.info(st.session_state.narrative)
     # Show video narration if available
-    st.markdown("""
-    **Goal:** Make as much money as possible by age 70—while managing risk, life events, and your own behavior!
-    """)
+    if st.session_state.get('video_url'):
+        st.video(st.session_state['video_url'])
+        st.write(f"Video URL: {st.session_state['video_url']}")
+    else:
+        st.warning("No video was generated for this year.")
     st.markdown("---")
     st.subheader("Current Portfolio")
     st.metric("Salary", f"${st.session_state.salary:,.0f}")
@@ -404,6 +441,7 @@ if run_year_btn:
     risky_behavior_score = 0
     narrative = ""
     coach_recommendation = None
+    video_url = None
     if AGNO_READY and coach_agent:
         prompt = f"Age: {st.session_state.age}\nAllocation: {alloc}\nRisk buffer: {risk_buffer}\nEvent: {st.session_state.event}\nGoal: {st.session_state.goal}"
         try:
@@ -427,8 +465,31 @@ if run_year_btn:
                 narrative = n_response.content.narrative
         except Exception as e:
             narrative = f"Narrative agent error: {e}"
+    # Video narration: get script, then generate video
+    video_script = None
+    if AGNO_READY and narrator_agent:
+        v_prompt = f"Age: {st.session_state.age}\nBirthplace: {st.session_state.birthplace}\nPhase: {st.session_state.phase}\nEvent: {st.session_state.event}\nPortfolio: {st.session_state.portfolio}"
+        try:
+            v_response: RunResponse = narrator_agent.run(v_prompt)
+            if v_response and v_response.content and isinstance(v_response.content, VideoNarrationOutput):
+                video_script = v_response.content.script
+        except Exception as e:
+            video_script = None
+    if AGNO_READY and video_agent and video_script:
+        try:
+            video_response: RunResponse = video_agent.run(f"Generate a video narration: {video_script}")
+            if video_response and video_response.content:
+                content_str = str(video_response.content).strip()
+                url_match = re.search(r"https?://[^\s)]+", content_str)
+                if url_match:
+                    video_url = url_match.group(0)
+                else:
+                    video_url = None
+        except Exception as e:
+            video_url = None
     st.session_state.feedback = feedback
     st.session_state.risky_behavior_score = risky_behavior_score
     st.session_state.narrative = narrative
     st.session_state.coach_recommendation = coach_recommendation
+    st.session_state.video_url = video_url
     st.rerun() 
