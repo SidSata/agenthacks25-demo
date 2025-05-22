@@ -51,6 +51,21 @@ def show_year_modal():
     with st.container():
         st.markdown(f"## Year {st.session_state.year} Summary")
         st.metric("Portfolio Value", f"${last['Total']:,.0f}", f"{change:+,.0f} ({change_pct:+.1f}%)")
+        # Show asset growth for the year
+        if prev is not None:
+            growths = {}
+            for k in ASSET_CLASSES:
+                if prev[k] != 0:
+                    growth = (last[k] - prev[k]) / prev[k] * 100
+                else:
+                    growth = float('nan')
+                growths[k] = growth
+            growth_str = '  '.join([
+                f"{k}: {growths[k]:+.1f}%" if not np.isnan(growths[k]) else f"{k}: N/A" for k in ASSET_CLASSES
+            ])
+            st.markdown(f"**Asset Growth This Year:**  {growth_str}")
+        else:
+            st.markdown("**Asset Growth This Year:**  N/A (first year)")
         # Show the life event
         if st.session_state.event:
             st.markdown(f"### \U0001F4F0 Life Event: {st.session_state.event}")
@@ -497,6 +512,8 @@ with main_left:
 with main_right:
     # Prominent Run Year button at the top right using Streamlit's native button
     run_year_btn = st.button("🚀 Run Year", key="run_year_top", use_container_width=True)
+    simulate_5_btn = st.button("⏩ Simulate 5 Years", key="simulate_5_years", use_container_width=True)
+    simulate_end_btn = st.button("🏁 Simulate Till End", key="simulate_till_end", use_container_width=True)
     # Sticky news feed and AI coach advice
     with st.container():
         st.markdown("### 📰 News Feed & AI Coach")
@@ -641,5 +658,84 @@ Give 2-line feedback and a risky-behavior score (0-1). Always output 2-3 actiona
         st.session_state.narrative = narrative
         st.session_state.coach_choices = coach_choices
         st.session_state.coach_justification = coach_justification
+        st.session_state.show_modal = True
+        st.rerun()
+
+# --- Simulate 5 Years Button logic ---
+if simulate_5_btn:
+    with st.spinner("Simulating 5 years..."):
+        years_to_sim = min(5, AGE_END - st.session_state.age + 1)
+        for _ in range(years_to_sim):
+            if st.session_state.age > AGE_END or st.session_state.get('show_modal', False):
+                break
+            # Repeat the same logic as run_year_btn, but skip modal until needed
+            last_yearly_return = 0
+            if len(st.session_state.history) > 0:
+                hist = pd.DataFrame(st.session_state.history)
+                if len(hist) > 1:
+                    last_yearly_return = (hist.iloc[-1]['Total'] - hist.iloc[-2]['Total']) / hist.iloc[-2]['Total'] * 100 if hist.iloc[-2]['Total'] > 0 else 0
+                else:
+                    last_yearly_return = (hist.iloc[-1]['Total'] - st.session_state.starting_budget) / st.session_state.starting_budget * 100 if st.session_state.starting_budget > 0 else 0
+            ignored_advice = False
+            if st.session_state.last_coach_advice:
+                if any(alloc[k] != st.session_state.last_coach_advice[k] for k in ASSET_CLASSES):
+                    ignored_advice = True
+                    st.session_state.ignored_advice_count += 1
+                if last_yearly_return > 5 and ignored_advice:
+                    st.session_state.player_outperformed_count += 1
+            action_summary = f"Year {st.session_state.year}: Player allocated: {alloc}. "
+            if st.session_state.last_coach_advice:
+                action_summary += f"Coach recommended: {st.session_state.last_coach_advice}. "
+            if ignored_advice:
+                action_summary += "(Player ignored advice). "
+            action_summary += f"Outcome: {last_yearly_return:.1f}% return."
+            memory.add_user_memory(
+                memory=UserMemory(
+                    memory=action_summary,
+                    topics=["actions", "advice", "outcome"]
+                ),
+                user_id=user_id
+            )
+            run_year(alloc, contribution_pct, rebalance, risk_buffer, withdrawal)
+            # If a modal is triggered (e.g., for a life event/choice), break and show it
+            if st.session_state.get('show_modal', False):
+                break
+        st.session_state.show_modal = True
+        st.rerun()
+
+# --- Simulate Till End Button logic ---
+if simulate_end_btn:
+    with st.spinner("Simulating till end of game..."):
+        while st.session_state.age <= AGE_END and not st.session_state.get('show_modal', False):
+            last_yearly_return = 0
+            if len(st.session_state.history) > 0:
+                hist = pd.DataFrame(st.session_state.history)
+                if len(hist) > 1:
+                    last_yearly_return = (hist.iloc[-1]['Total'] - hist.iloc[-2]['Total']) / hist.iloc[-2]['Total'] * 100 if hist.iloc[-2]['Total'] > 0 else 0
+                else:
+                    last_yearly_return = (hist.iloc[-1]['Total'] - st.session_state.starting_budget) / st.session_state.starting_budget * 100 if st.session_state.starting_budget > 0 else 0
+            ignored_advice = False
+            if st.session_state.last_coach_advice:
+                if any(alloc[k] != st.session_state.last_coach_advice[k] for k in ASSET_CLASSES):
+                    ignored_advice = True
+                    st.session_state.ignored_advice_count += 1
+                if last_yearly_return > 5 and ignored_advice:
+                    st.session_state.player_outperformed_count += 1
+            action_summary = f"Year {st.session_state.year}: Player allocated: {alloc}. "
+            if st.session_state.last_coach_advice:
+                action_summary += f"Coach recommended: {st.session_state.last_coach_advice}. "
+            if ignored_advice:
+                action_summary += "(Player ignored advice). "
+            action_summary += f"Outcome: {last_yearly_return:.1f}% return."
+            memory.add_user_memory(
+                memory=UserMemory(
+                    memory=action_summary,
+                    topics=["actions", "advice", "outcome"]
+                ),
+                user_id=user_id
+            )
+            run_year(alloc, contribution_pct, rebalance, risk_buffer, withdrawal)
+            if st.session_state.get('show_modal', False):
+                break
         st.session_state.show_modal = True
         st.rerun() 
