@@ -177,14 +177,29 @@ SALARY_GROWTH_MEAN, SALARY_GROWTH_STD = 0.03, 0.02
 
 # --- RANDOM EVENTS (WITH CHOICES) -------------------------------------------
 NEWS_EVENTS = [
-    ("Dot-com crash! Stocks drop 30%.", {"Stocks": -0.3}, None),
+    # --- Normal (60%) ---
+    ("No major events this year.", {}, None),
+    ("Steady economic growth. Markets are calm.", {}, None),
+    ("Mild inflation. Cash loses 2% value.", {"Cash": -0.02}, None),
+    ("Interest rates unchanged. Bonds steady.", {"Bonds": 0.0}, None),
+    ("Stable job market. No major changes.", {}, None),
+    ("Mild market volatility. Small ups and downs.", {}, None),
+    ("Slight uptick in tech stocks. Stocks up 3%.", {"Stocks": 0.03}, None),
+    ("Healthcare sector stable. No effect.", {}, None),
+    ("Consumer confidence steady. No effect.", {}, None),
+    ("Mild currency fluctuation. Cash up 1%.", {"Cash": 0.01}, None),
+    ("Bond market quiet. No effect.", {}, None),
+    ("Alternatives see mild growth. Alternatives up 2%.", {"Alternatives": 0.02}, None),
+    # --- Great (20%) ---
+    ("Bull market! Stocks up 15%.", {"Stocks": 0.15}, None),
     ("Bond rally! Bonds up 10%.", {"Bonds": 0.1}, None),
     ("Crypto boom! Alternatives up 20%.", {"Alternatives": 0.2}, None),
-    ("Inflation spike! Cash loses 5% value.", {"Cash": -0.05}, None),
-    ("Layoff! Must withdraw 6 months' salary.", "layoff", None),
-    ("Medical bill! Emergency fund needed.", "medical", None),
-    ("Bull market! Stocks up 15%.", {"Stocks": 0.15}, None),
-    ("No major events this year.", {}, None),
+    ("Unexpected inheritance! Cash up 20%.", {"Cash": 0.2}, None),
+    ("Tech breakthrough! Stocks up 20%.", {"Stocks": 0.2}, None),
+    ("Salary bonus! Cash up 10%.", {"Cash": 0.1}, None),
+    ("Emerging markets surge! Alternatives up 15%.", {"Alternatives": 0.15}, None),
+    # --- Bad (20%) ---
+    ("Dot-com crash! Stocks drop 30%.", {"Stocks": -0.3}, None),
     ("Tech Bubble Burst! Your tech-heavy stock allocation has taken a 40% hit.",
      {"Stocks": -0.4},
      [
@@ -192,6 +207,13 @@ NEWS_EVENTS = [
          {"label": "Rebalance Now", "description": "Sell some of what's left of stocks and buy more bonds/cash. (Risk: Miss out on a quick rebound, lock in some loss)"},
          {"label": "Double Down", "description": "Buy more stocks at these lower prices. (Risk: High risk, high potential reward/loss)"},
      ]),
+    ("Layoff! Must withdraw 6 months' salary.", "layoff", None),
+    ("Medical bill! Emergency fund needed.", "medical", None),
+    ("Inflation spike! Cash loses 5% value.", {"Cash": -0.05}, None),
+    ("Bond market crash! Bonds down 12%.", {"Bonds": -0.12}, None),
+    ("Crypto winter! Alternatives down 18%.", {"Alternatives": -0.18}, None),
+    ("Unexpected tax bill! Cash down 8%.", {"Cash": -0.08}, None),
+    ("Natural disaster! Stocks and bonds both down 7%.", {"Stocks": -0.07, "Bonds": -0.07}, None),
 ]
 
 # --- SESSION STATE INIT -----------------------------------------------------
@@ -444,6 +466,13 @@ with main_left:
         st.subheader("📊 Asset Mix by Year")
         mix_by_year = hist.groupby('Year')[ASSET_CLASSES].mean()
         st.bar_chart(mix_by_year, use_container_width=True, height=200)
+        # --- Asset Growth by Year ---
+        st.subheader("📈 Asset Growth by Year")
+        # Calculate yearly percentage growth for Stocks, Bonds, Cash
+        growth_df = hist[['Year', 'Stocks', 'Bonds', 'Cash']].copy()
+        growth_df.set_index('Year', inplace=True)
+        growth_pct = growth_df.pct_change().fillna(0) * 100
+        st.line_chart(growth_pct, use_container_width=True, height=200)
         st.markdown("---")
         st.write("### Year-by-Year Breakdown")
         st.dataframe(hist, use_container_width=True, height=350)
