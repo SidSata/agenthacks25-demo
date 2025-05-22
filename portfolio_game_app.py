@@ -29,6 +29,43 @@ from agno.memory.v2.schema import UserMemory
 
 load_dotenv()
 
+# --- STREAMLIT UI -----------------------------------------------------------
+st.set_page_config("💸 Portfolio Game Simulator", layout="wide")
+
+# --- MODAL WORKAROUND: Show modal at the very top and block rest of app ---
+def show_year_modal():
+    hist = pd.DataFrame(st.session_state.history)
+    if len(hist) < 1:
+        return
+    last = hist.iloc[-1]
+    prev = hist.iloc[-2] if len(hist) > 1 else None
+    change = last['Total'] - (prev['Total'] if prev is not None else st.session_state.starting_budget)
+    change_pct = (change / (prev['Total'] if prev is not None else st.session_state.starting_budget)) * 100 if (prev is not None and prev['Total'] > 0) or (prev is None and st.session_state.starting_budget > 0) else 0
+    with st.container():
+        st.markdown(f"## Year {st.session_state.year} Summary")
+        st.metric("Portfolio Value", f"${last['Total']:,.0f}", f"{change:+,.0f} ({change_pct:+.1f}%)")
+        if st.session_state.narrative:
+            st.info(st.session_state.narrative)
+        if st.session_state.feedback:
+            st.write(f"**Coach Dinero 🧑‍💼:** {st.session_state.feedback}")
+        choices = st.session_state.get('current_event_choices', None)
+        if choices:
+            st.markdown("### What will you do?")
+            choice_labels = [c['label'] for c in choices]
+            choice_idx = st.radio("Choose your response:", choice_labels, key=f"choice_{st.session_state.year}")
+            if st.button("Confirm Choice", key=f"confirm_{st.session_state.year}"):
+                st.session_state.selected_choice = choice_labels.index(choice_idx)
+                st.session_state.show_modal = False
+                st.rerun()
+        else:
+            if st.button("Continue", key=f"continue_{st.session_state.year}"):
+                st.session_state.show_modal = False
+                st.rerun()
+
+if st.session_state.get('show_modal', False):
+    show_year_modal()
+    st.stop()
+
 # --- AGNO AGENT SETUP -------------------------------------------------------
 class CoachChoice(BaseModel):
     label: str = Field(..., description="Short label for the choice (e.g. 'Stay the Course')")
@@ -273,7 +310,6 @@ def run_year(allocation, contribution_pct, rebalance, risk_buffer, withdrawal, p
     })
 
 # --- STREAMLIT UI -----------------------------------------------------------
-st.set_page_config("💸 Portfolio Game Simulator", layout="wide")
 _initialize_agno_agent()
 init_state()
 
@@ -531,48 +567,4 @@ Give 2-line feedback and a risky-behavior score (0-1). Always output a recommend
         st.session_state.narrative = narrative
         st.session_state.coach_recommendation = coach_recommendation
         st.session_state.show_modal = True
-        st.rerun()
-
-# Show modal if needed
-if st.session_state.get('show_modal', False):
-    show_year_modal()
-
-# --- MODAL UI AFTER RUNNING YEAR --------------------------------------------
-def show_year_modal():
-    hist = pd.DataFrame(st.session_state.history)
-    if len(hist) < 1:
-        return
-    last = hist.iloc[-1]
-    prev = hist.iloc[-2] if len(hist) > 1 else None
-    change = last['Total'] - (prev['Total'] if prev is not None else st.session_state.starting_budget)
-    change_pct = (change / (prev['Total'] if prev is not None else st.session_state.starting_budget)) * 100 if (prev is not None and prev['Total'] > 0) or (prev is None and st.session_state.starting_budget > 0) else 0
-    # Modal content (simulate modal with a container at the top)
-    with st.container():
-        st.markdown("""
-            <div style='position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center;'>
-                <div style='background:white; padding:2em; border-radius:1em; min-width:350px; max-width:90vw;'>
-        """, unsafe_allow_html=True)
-        st.markdown(f"## Year {st.session_state.year} Summary")
-        st.metric("Portfolio Value", f"${last['Total']:,.0f}", f"{change:+,.0f} ({change_pct:+.1f}%)")
-        if st.session_state.narrative:
-            st.info(st.session_state.narrative)
-        if st.session_state.feedback:
-            st.write(f"**Coach Dinero 🧑‍💼:** {st.session_state.feedback}")
-        # Show choices if any
-        choices = st.session_state.get('current_event_choices', None)
-        if choices:
-            st.markdown("### What will you do?")
-            choice_labels = [c['label'] for c in choices]
-            choice_idx = st.radio("Choose your response:", choice_labels, key=f"choice_{st.session_state.year}")
-            if st.button("Confirm Choice", key=f"confirm_{st.session_state.year}"):
-                st.session_state.selected_choice = choice_labels.index(choice_idx)
-                st.session_state.show_modal = False
-                st.rerun()
-        else:
-            if st.button("Continue", key=f"continue_{st.session_state.year}"):
-                st.session_state.show_modal = False
-                st.rerun()
-        st.markdown("""
-                </div>
-            </div>
-        """, unsafe_allow_html=True) 
+        st.rerun() 
