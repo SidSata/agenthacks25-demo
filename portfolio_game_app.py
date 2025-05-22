@@ -135,12 +135,13 @@ class NarrativeOutput(BaseModel):
     narrative: str = Field(..., description="Short immersive story for the year")
 
 OPENAI_API_KEY_VALUE = None
+REPLICATE_API_TOKEN_VALUE = None
 AGNO_READY = False
 coach_agent: Agent | None = None
 narrative_agent: Agent | None = None
 
 def _initialize_agno_agent():
-    global OPENAI_API_KEY_VALUE, AGNO_READY, coach_agent, narrative_agent
+    global OPENAI_API_KEY_VALUE, REPLICATE_API_TOKEN_VALUE, AGNO_READY, coach_agent, narrative_agent
     try:
         import agno
     except ImportError:
@@ -148,9 +149,14 @@ def _initialize_agno_agent():
         AGNO_READY = False
         return
     OPENAI_API_KEY_VALUE = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+    REPLICATE_API_TOKEN_VALUE = st.secrets.get("REPLICATE_API_TOKEN") or os.getenv("REPLICATE_API_TOKEN")
     if OPENAI_API_KEY_VALUE:
         if "OPENAI_API_KEY" not in os.environ:
             os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY_VALUE
+    if REPLICATE_API_TOKEN_VALUE:
+        if "REPLICATE_API_TOKEN" not in os.environ:
+            os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN_VALUE
+    if OPENAI_API_KEY_VALUE:
         try:
             coach_agent = Agent(
                 name="FinanceCoach",
