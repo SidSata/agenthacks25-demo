@@ -44,19 +44,28 @@ def show_year_modal():
     with st.container():
         st.markdown(f"## Year {st.session_state.year} Summary")
         st.metric("Portfolio Value", f"${last['Total']:,.0f}", f"{change:+,.0f} ({change_pct:+.1f}%)")
+        # Show the life event
+        if st.session_state.event:
+            st.markdown(f"### 📰 Life Event: {st.session_state.event}")
         if st.session_state.narrative:
             st.info(st.session_state.narrative)
         if st.session_state.feedback:
             st.write(f"**Coach Dinero 🧑‍💼:** {st.session_state.feedback}")
-        choices = st.session_state.get('current_event_choices', None)
+        choices = st.session_state.get('coach_choices', None)
         if choices:
             st.markdown("### What will you do?")
-            choice_labels = [c['label'] for c in choices]
-            choice_idx = st.radio("Choose your response:", choice_labels, key=f"choice_{st.session_state.year}")
+            choice_labels = [f"{c['label']}: {c['description']}" for c in choices]
+            selected = st.radio("Choose your response:", choice_labels, key=f"choice_{st.session_state.year}")
             if st.button("Confirm Choice", key=f"confirm_{st.session_state.year}"):
-                st.session_state.selected_choice = choice_labels.index(choice_idx)
+                selected_choice = choices[choice_labels.index(selected)]
+                # Set allocation in session state for next year
+                for k in ASSET_CLASSES:
+                    st.session_state[f'alloc_{k}'] = selected_choice[k]
+                st.session_state.selected_choice = choice_labels.index(selected)
                 st.session_state.show_modal = False
                 st.rerun()
+            st.markdown("---")
+            st.markdown("Or adjust your allocation manually in the sidebar before running the next year.")
         else:
             if st.button("Continue", key=f"continue_{st.session_state.year}"):
                 st.session_state.show_modal = False
@@ -70,16 +79,16 @@ if st.session_state.get('show_modal', False):
 class CoachChoice(BaseModel):
     label: str = Field(..., description="Short label for the choice (e.g. 'Stay the Course')")
     description: str = Field(..., description="Description of the choice and its risk/reward")
-
-class CoachFeedback(BaseModel):
-    feedback: str = Field(..., description="Socratic feedback for the player")
-    risky_behavior_score: float = Field(..., description="Score 0-1 for risky behavior this year")
     rec_stocks: float = Field(..., description="Recommended % allocation to stocks (0-100)")
     rec_bonds: float = Field(..., description="Recommended % allocation to bonds (0-100)")
     rec_cash: float = Field(..., description="Recommended % allocation to cash (0-100)")
     rec_alternatives: float = Field(..., description="Recommended % allocation to alternatives (0-100)")
-    rec_justification: str = Field(..., description="Justification for the recommended allocation")
-    choices: list[CoachChoice] = Field(default_factory=list, description="List of player choices for this event, if any.")
+
+class CoachFeedback(BaseModel):
+    feedback: str = Field(..., description="Socratic feedback for the player")
+    risky_behavior_score: float = Field(..., description="Score 0-1 for risky behavior this year")
+    choices: list[CoachChoice] = Field(..., description="2-3 player choices for this event, each with a label, description, and recommended allocation.")
+    rec_justification: str = Field(..., description="Justification for the recommended choices")
 
 class NarrativeOutput(BaseModel):
     narrative: str = Field(..., description="Short immersive story for the year")
@@ -107,7 +116,8 @@ def _initialize_agno_agent():
                 model=OpenAIChat(id="gpt-4o"),
                 instructions=[
                     "You are a Socratic personal finance coach. Given the player's age, asset allocation, risk buffer, recent market/life events, and their goal, give 2-line feedback and a risky-behavior score (0-1).",
-                    "Always output a recommended allocation for the next year as four numbers (stocks, bonds, cash, alternatives) that sum to 100, and provide a concise justification for this recommendation. Output JSON with keys: feedback, risky_behavior_score, rec_stocks, rec_bonds, rec_cash, rec_alternatives, rec_justification.",
+                    "Always output 2-3 actionable choices for the player, each with: label, description, and a recommended allocation for the next year (stocks, bonds, cash, alternatives, each summing to 100).",
+                    "Output JSON with keys: feedback, risky_behavior_score, choices (list of objects with label, description, rec_stocks, rec_bonds, rec_cash, rec_alternatives), rec_justification.",
                 ],
                 response_model=CoachFeedback,
             )
@@ -131,7 +141,7 @@ def _initialize_agno_agent():
 
 # --- GAME CONSTANTS ---------------------------------------------------------
 AGE_START = 20
-AGE_END = 70
+AGE_END = 30  # Only 10 years, end at age 30
 YEARS = AGE_END - AGE_START
 ASSET_CLASSES = ["Stocks", "Bonds", "Cash", "Alternatives"]
 DEFAULT_ALLOCATION = {"Stocks": 60, "Bonds": 30, "Cash": 10, "Alternatives": 0}
@@ -332,7 +342,7 @@ with st.sidebar:
     st.header("Your Yearly Plan")
     st.write(f"**Year {st.session_state.year+1}  |  Age {st.session_state.age}**")
     # User-settable goal
-    goal = st.number_input("Set your target portfolio value at age 70 ($)", 10000, 10000000, 1000000, step=10000)
+    goal = st.number_input("Set your target portfolio value at age 30 ($)", 10000, 10000000, 1000000, step=10000)
     st.session_state.goal = goal
     # Dynamic allocation sliders that cannot sum above 100%
     alloc = {}
@@ -392,7 +402,7 @@ with main_left:
     pf = st.session_state.portfolio
     st.markdown("# 💰 Portfolio Value")
     st.markdown(f"<h1 style='font-size:3em; color:green;'>${sum(pf.values()):,.0f}</h1>", unsafe_allow_html=True)
-    st.markdown(f"<b>Goal for age 70:</b> ${st.session_state.goal:,.0f}", unsafe_allow_html=True)
+    st.markdown(f"<b>Goal for age 30:</b> ${st.session_state.goal:,.0f}", unsafe_allow_html=True)
     # Narrative at the top
     if st.session_state.narrative:
         st.info(st.session_state.narrative)
@@ -518,7 +528,8 @@ if run_year_btn:
         feedback = ""
         risky_behavior_score = 0
         narrative = ""
-        coach_recommendation = None
+        coach_choices = None
+        coach_justification = None
         if AGNO_READY and coach_agent:
             # Retrieve memories for the coach
             recent_memories = memory.get_user_memories(user_id=user_id)
@@ -535,23 +546,29 @@ Age: {st.session_state.age}
 Current Allocation: {alloc}
 Risk Buffer: {risk_buffer}
 Last Market Event: {st.session_state.event}
-Player's Goal (at age 70): ${st.session_state.goal:,.0f}
+Player's Goal (at age 30): ${st.session_state.goal:,.0f}
 
-Give 2-line feedback and a risky-behavior score (0-1). Always output a recommended allocation for the next year (stocks, bonds, cash, alternatives summing to 100) and a concise justification. Adjust your tone based on player's history.
+Give 2-line feedback and a risky-behavior score (0-1). Always output 2-3 actionable choices for the player, each with: label, description, and a recommended allocation for the next year (stocks, bonds, cash, alternatives, each summing to 100).
 """
             try:
                 response: RunResponse = coach_agent.run(prompt)
                 if response and response.content and isinstance(response.content, CoachFeedback):
                     feedback = response.content.feedback
                     risky_behavior_score = response.content.risky_behavior_score
-                    coach_recommendation = {
-                        'Stocks': int(response.content.rec_stocks),
-                        'Bonds': int(response.content.rec_bonds),
-                        'Cash': int(response.content.rec_cash),
-                        'Alternatives': int(response.content.rec_alternatives),
-                        'Justification': response.content.rec_justification,
-                    }
-                    st.session_state.last_coach_advice = {k: coach_recommendation[k] for k in ASSET_CLASSES}
+                    coach_choices = [
+                        {
+                            'label': c.label,
+                            'description': c.description,
+                            'Stocks': int(c.rec_stocks),
+                            'Bonds': int(c.rec_bonds),
+                            'Cash': int(c.rec_cash),
+                            'Alternatives': int(c.rec_alternatives),
+                        } for c in response.content.choices
+                    ]
+                    coach_justification = response.content.rec_justification
+                    # Default to first choice for last_coach_advice
+                    if coach_choices:
+                        st.session_state.last_coach_advice = {k: coach_choices[0][k] for k in ASSET_CLASSES}
             except Exception as e:
                 feedback = f"AI coach error: {e}"
         if AGNO_READY and narrative_agent: # Check if narrative_agent is not None
@@ -565,6 +582,7 @@ Give 2-line feedback and a risky-behavior score (0-1). Always output a recommend
         st.session_state.feedback = feedback
         st.session_state.risky_behavior_score = risky_behavior_score
         st.session_state.narrative = narrative
-        st.session_state.coach_recommendation = coach_recommendation
+        st.session_state.coach_choices = coach_choices
+        st.session_state.coach_justification = coach_justification
         st.session_state.show_modal = True
         st.rerun() 
