@@ -372,6 +372,24 @@ with st.sidebar:
     if sum(alloc.values()) != 100:
         st.warning("Asset allocation must sum to 100%.")
         st.stop()
+    # --- Dynamic Risk Score Calculation ---
+    # Use the same logic as in run_year for VaR_5 (5th percentile worst year)
+    RETURNS = {
+        "Stocks": (0.07, 0.16),
+        "Bonds": (0.03, 0.06),
+        "Cash": (0.01, 0.01),
+        "Alternatives": (0.09, 0.25),
+    }
+    sim_returns = [sum([np.random.normal(RETURNS[k][0], RETURNS[k][1]) * alloc[k] / 100 for k in ASSET_CLASSES]) for _ in range(1000)]
+    var_5 = np.percentile(sim_returns, 5)
+    # Color code: green (>-0.05), orange (-0.10 to -0.05), red (<-0.10)
+    if var_5 > -0.05:
+        risk_color = 'green'
+    elif var_5 > -0.10:
+        risk_color = 'orange'
+    else:
+        risk_color = 'red'
+    st.markdown(f"<span style='font-size:1.2em; font-weight:bold;'>Risk Score (VaR 5%): <span style='color:{risk_color};'>{var_5:.1%}</span></span>", unsafe_allow_html=True)
     st.markdown("---")
     # Show current mix pie chart in sidebar
     pf = st.session_state.portfolio
