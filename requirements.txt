@@ -8,3 +8,4 @@ agno>=0.2.0
 openai>=1.0.0
 replicate>=0.16.0 
 sqlalchemy>=2.0.0
+colorama>=0.4.4
