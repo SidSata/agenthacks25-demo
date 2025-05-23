@@ -333,12 +333,16 @@ def get_buffett_decisions(portfolio, stock_data, current_year, market_event):
         return buffett_fallback_decisions(portfolio, stock_data, current_year)
     
     decisions = []
+    # Filter out 'cash' from portfolio keys when getting current prices
+    stock_tickers = [ticker for ticker in portfolio.keys() if ticker != 'cash']
     current_prices = {ticker: stock_data.loc[stock_data['Year'] == current_year, ticker].values[0] 
-                     for ticker in portfolio.keys()}
+                     for ticker in stock_tickers}
     
     # Prepare the portfolio information for the agent
     portfolio_info = []
     for ticker, quantity in portfolio.items():
+        if ticker == 'cash':
+            continue
         if quantity > 0:
             price = current_prices[ticker]
             value = price * quantity
@@ -346,7 +350,7 @@ def get_buffett_decisions(portfolio, stock_data, current_year, market_event):
     
     # Prepare stock information
     stock_info = []
-    for ticker in portfolio.keys():
+    for ticker in stock_tickers:  # Use filtered list without 'cash'
         price = current_prices[ticker]
         price_last_year = stock_data.loc[stock_data['Year'] == current_year-1, ticker].values[0] if current_year > START_YEAR else price
         pct_change = ((price - price_last_year) / price_last_year * 100) if price_last_year > 0 else 0
@@ -355,7 +359,6 @@ def get_buffett_decisions(portfolio, stock_data, current_year, market_event):
     # Prepare prompt for Buffett agent
     prompt = f"""
 Year: {current_year}
-Cash: ${portfolio['cash']:.2f}
 
 Market Event:
 {market_event['headline']}
@@ -381,6 +384,8 @@ Include your reasoning for each decision in your folksy style.
             # Simple parsing strategy: look for lines with BUY, SELL, or HOLD
             for line in raw_decisions.split('\n'):
                 for ticker in portfolio.keys():
+                    if ticker == 'cash':  # Skip cash ticker
+                        continue
                     if ticker in line:
                         if "BUY" in line.upper():
                             # Extract quantity and reasoning
@@ -530,12 +535,16 @@ def get_soros_decisions(portfolio, stock_data, current_year, market_event):
         return soros_fallback_decisions(portfolio, stock_data, current_year)
     
     decisions = []
+    # Filter out 'cash' from portfolio keys when getting current prices
+    stock_tickers = [ticker for ticker in portfolio.keys() if ticker != 'cash']
     current_prices = {ticker: stock_data.loc[stock_data['Year'] == current_year, ticker].values[0] 
-                     for ticker in portfolio.keys()}
+                     for ticker in stock_tickers}
     
     # Prepare the portfolio information for the agent
     portfolio_info = []
     for ticker, quantity in portfolio.items():
+        if ticker == 'cash':
+            continue
         if quantity > 0:
             price = current_prices[ticker]
             value = price * quantity
@@ -543,7 +552,7 @@ def get_soros_decisions(portfolio, stock_data, current_year, market_event):
     
     # Prepare stock information
     stock_info = []
-    for ticker in portfolio.keys():
+    for ticker in stock_tickers:  # Use filtered list without 'cash'
         price = current_prices[ticker]
         price_last_year = stock_data.loc[stock_data['Year'] == current_year-1, ticker].values[0] if current_year > START_YEAR else price
         pct_change = ((price - price_last_year) / price_last_year * 100) if price_last_year > 0 else 0
@@ -579,6 +588,8 @@ Include your reasoning for each decision with philosophical undertones where rel
             # Simple parsing strategy: look for lines with BUY, SELL, or HOLD
             for line in raw_decisions.split('\n'):
                 for ticker in portfolio.keys():
+                    if ticker == 'cash':  # Skip cash ticker
+                        continue
                     if ticker in line:
                         if "BUY" in line.upper():
                             # Extract quantity and reasoning
@@ -933,6 +944,9 @@ def print_portfolio(player, stock_data, current_year):
         print(Fore.GREEN + "-" * 60 + Style.RESET_ALL)
         
         for ticker, quantity in player.portfolio.items():
+            if ticker not in stock_data.columns:
+                print(f"Warning: {ticker} not found in stock data, skipping...")
+                continue
             current_price = stock_data.loc[stock_data['Year'] == current_year, ticker].values[0]
             value = quantity * current_price
             total_value += value
@@ -1608,36 +1622,56 @@ def main():
         buffett_decisions = get_buffett_decisions(buffett_portfolio, stock_data, year, market_event)
         soros_decisions = get_soros_decisions(soros_portfolio, stock_data, year, market_event)
         
-        # Execute AI decisions
+        # Execute AI decisions with error handling
         for decision in buffett_decisions:
-            ticker = decision['ticker']
-            action = decision['action']
-            quantity = decision['quantity']
-            price = stock_data.loc[stock_data['Year'] == year, ticker].values[0]
-            reasoning = decision['reasoning']
-            
-            if action == 'buy':
-                buffett.buy(ticker, quantity, price, year, reasoning)
-            elif action == 'sell':
-                buffett.sell(ticker, quantity, price, year, reasoning)
-            else:  # hold
-                if buffett.portfolio.get(ticker, 0) > 0:  # Only hold if we actually own the stock
-                    buffett.hold(ticker, year, reasoning)
+            try:
+                ticker = decision['ticker']
+                if ticker == 'cash':  # Skip cash ticker
+                    continue
+                action = decision['action']
+                quantity = decision['quantity']
+                if ticker in stock_data.columns:
+                    price = stock_data.loc[stock_data['Year'] == year, ticker].values[0]
+                else:
+                    print(f"Warning: Ticker {ticker} not found in stock data, skipping...")
+                    continue
+                reasoning = decision['reasoning']
+                
+                if action == 'buy':
+                    buffett.buy(ticker, quantity, price, year, reasoning)
+                elif action == 'sell':
+                    buffett.sell(ticker, quantity, price, year, reasoning)
+                else:  # hold
+                    if buffett.portfolio.get(ticker, 0) > 0:  # Only hold if we actually own the stock
+                        buffett.hold(ticker, year, reasoning)
+            except Exception as e:
+                print(f"Error processing Buffett decision for {ticker}: {e}")
+                continue
                 
         for decision in soros_decisions:
-            ticker = decision['ticker']
-            action = decision['action']
-            quantity = decision['quantity']
-            price = stock_data.loc[stock_data['Year'] == year, ticker].values[0]
-            reasoning = decision['reasoning']
-            
-            if action == 'buy':
-                soros.buy(ticker, quantity, price, year, reasoning)
-            elif action == 'sell':
-                soros.sell(ticker, quantity, price, year, reasoning)
-            else:  # hold
-                if soros.portfolio.get(ticker, 0) > 0:  # Only hold if we actually own the stock
-                    soros.hold(ticker, year, reasoning)
+            try:
+                ticker = decision['ticker']
+                if ticker == 'cash':  # Skip cash ticker
+                    continue
+                action = decision['action']
+                quantity = decision['quantity']
+                if ticker in stock_data.columns:
+                    price = stock_data.loc[stock_data['Year'] == year, ticker].values[0]
+                else:
+                    print(f"Warning: Ticker {ticker} not found in stock data, skipping...")
+                    continue
+                reasoning = decision['reasoning']
+                
+                if action == 'buy':
+                    soros.buy(ticker, quantity, price, year, reasoning)
+                elif action == 'sell':
+                    soros.sell(ticker, quantity, price, year, reasoning)
+                else:  # hold
+                    if soros.portfolio.get(ticker, 0) > 0:  # Only hold if we actually own the stock
+                        soros.hold(ticker, year, reasoning)
+            except Exception as e:
+                print(f"Error processing Soros decision for {ticker}: {e}")
+                continue
         
         # Update net worth for all players
         current_prices = {ticker: stock_data.loc[stock_data['Year'] == year, ticker].values[0] 
@@ -1661,4 +1695,12 @@ def main():
     print_game_summary(player, buffett, soros, stock_data)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\nGame interrupted by user. Goodbye!")
+    except Exception as e:
+        print(f"\n\nAn error occurred: {e}")
+        print("Please report this issue if it persists.")
+        import traceback
+        traceback.print_exc()
